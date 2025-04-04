@@ -42,55 +42,64 @@ def configure_gemini():
 def create_flashcard_prompt() -> str:
     """Creates the detailed prompt for Gemini requesting structured JSON output from a provided document."""
 
+    # Note the use of {{ and }} to escape literal braces within the f-string
     prompt = f"""
-    You are an expert academic assistant helping a PhD student prepare for comprehensive exams.
-    Your task is to analyze the **provided academic paper document (PDF)** and generate high-quality Anki flashcards focused on understanding the paper's significance, arguments, methods, findings, and limitations.
-    Create as many flashcards as necessary to effectively cover the key concepts and findings of the paper, following the below principles and aspects.
+    You are an expert academic assistant tasked with aiding a PhD student preparing for comprehensive exams.
 
-    Apply these learning science principles for card creation:
-    1.  **Atomicity:** Each card should test ONLY ONE specific concept, finding, argument, or term.
-    2. **Future-proofing:** Add more specificity to the questions and answers. Avoid vague or overly broad prompts. For example, instead of "What is the main finding?", use "What was the primary research question addressed in Author et al., 1999?". Further, add in more context like descriptors.
-    3.  **Active Recall:** Frame cards as specific questions (What, Why, How, What is the significance of...) or prompts requiring recall (Define X, Explain Y's role). Avoid simple True/False or vague prompts.
-    4.  **Significance Focus:** Prioritize information crucial for understanding the paper's contribution, limitations, and place in the field. Go beyond surface-level facts. Connect findings/discussion back to the core research question where possible.
-    5.  **Conciseness:** Keep both the 'front' (question/prompt) and 'back' (answer/explanation) clear, brief, and short.
-    6.  **Clarity:** Use clear, precise language. Be specific in your questions and answers. Always explicitly define which paper you are referring to in the question.
-    7.  **Building Blocks:** Use the paper's abstract, introduction, and conclusion as a starting point for generating questions. These sections often contain the most important information and can help you identify key concepts and findings.
-    8.  **Avoid Recitation:** Do not include verbatim text from the paper. Instead, paraphrase and summarize key points.
-    9.  **Avoid Overlap:** Ensure that each card covers a unique aspect of the paper. Avoid redundancy and overlap between cards.
-    10. **Avoid Recursion:** Do not include questions that ask for a list of items or concepts. Instead, focus on specific details and explanations.
-    11. **Avoid Ambiguity:** Ensure that each question has a clear and unambiguous answer. Avoid questions that could be interpreted in multiple ways.
-    12. **Keep it short:** Aim for a maximum of 2-3 sentences per card. Avoid lengthy explanations or complex language. More cards are better with less information is better than fewer cards with more information.
-    13. **Build on the basics:** Start with cards covering basic concepts of the paper and gradually move to more complex ideas. This will help reinforce foundational knowledge before diving into more advanced topics.
-    14. **Use examples:** Where appropriate, include examples or case studies to illustrate key concepts. This can help reinforce understanding and make the material more relatable.
-    15. **Order by complexity:** Organize the cards in a logical order, starting with simpler concepts and gradually progressing to more complex ideas. This will help reinforce understanding and make the material more relatable.
+    **Input Source:**
+    You will be provided with a **single academic paper document (PDF)**. All generated content MUST be derived **exclusively** from this document. Do not use any external knowledge or other sources.
 
-    Generate cards covering these aspects based on the **entire paper provided**:
-    * **Core Problem/Question:** What specific gap, problem, or research question does the paper address?
-    * **Hypothesis/Objective:** What are the main hypotheses or objectives?
-    * **Methodology:** What are the key methods/techniques, and their purpose/significance?
-    * **Key Findings/Results:** What are the specific, significant findings reported (quantify if possible)? Frame as questions about the finding.
-    * **Interpretations/Conclusions:** What interpretations or conclusions do the authors draw? What is the main takeaway/contribution?
-    * **Limitations/Caveats:** What specific limitations or weaknesses are mentioned?
-    * **Key Terms/Concepts:** Define or explain crucial technical terms or concepts.
-    * **Connections (Optional but helpful):** If evident, briefly frame a question about how a finding relates to the initial problem or hypothesis.
-    * **General Questions:** If the paper is a review or meta-analysis, generate questions about the overall findings or trends across studies.
-    * **Theoretical Implications:** What are the theoretical implications of the findings? How do they contribute to existing theories or frameworks in the field?
-    * **Practical Implications:** What are the practical implications of the findings? How can they be applied in real-world contexts?
-    * **Future Directions:** What future research directions do the authors suggest? What are the potential areas for further investigation?
-    * **Comparative Analysis:** If applicable, how do the findings compare to previous research in the field? What are the similarities and differences?
+    **Primary Goal:**
+    Analyze the **entire provided academic paper** and generate high-quality Anki flashcards designed to facilitate deep understanding of the paper's core elements. The output MUST be a valid JSON list of flashcard objects.
 
-    **Output Format:**
-    Return ONLY a valid JSON list containing flashcard objects. Each object must have exactly two keys: "front" and "back". Do NOT include any text, explanations, or markdown formatting outside the JSON list itself.
+    **Flashcard Creation Principles (Apply Rigorously):**
 
-    Example JSON Output Structure (General Questions):
+    1.  **Atomicity:** Each card MUST test ONLY ONE specific concept, finding, argument, method detail, term, or limitation.
+    2.  **Specificity & Context (Future-proofing):** Questions and answers must be highly specific. Always include context, such as the paper reference (e.g., "In Author et al., 1999...") within the question (front). Avoid vague prompts like "What was the method?". Instead, ask "What specific statistical test was used in Author et al., 1999 to compare group A and group B?".
+    3.  **Active Recall:** Frame cards as specific questions (What, Why, How, What is the significance of...) or direct prompts requiring recall (Define X, Explain Y's purpose in Author et al., 1999). Avoid True/False or overly simple recall.
+    4.  **Significance Focus:** Prioritize information crucial for understanding the paper's contribution, core argument, limitations, and its place within its field. Go beyond surface-level facts. Where possible, link findings/interpretations back to the central research question or hypothesis.
+    5.  **Conciseness:** Keep questions (front) and answers (back) clear, brief, and focused on the single atomic point.
+    6.  **Clarity:** Use precise academic language appropriate to the paper's field. Be unambiguous in questions and answers.
+    7.  **Avoid Overlap:** Ensure each card covers a unique piece of information. Do not create redundant cards testing the same point.
+    8.  **Avoid List Generation Prompts:** Frame questions for single, specific answers, not lists. E.g., Instead of "List the limitations," create separate cards like "What was one key limitation mentioned regarding sample size in Author et al., 1999?".
+    9.  **Keep Answers Short:** Answers (back) should ideally be 1-3 concise sentences. Use bullet points *only* if absolutely essential for clarity within a *single* atomic concept and cannot be broken into separate atomic cards.
+    10. **Use Examples (If Applicable):** If the paper provides specific examples to illustrate a concept or finding, create a card asking about that example or its significance.
+    11. **Verify Accuracy:** Ensure all information presented in the cards is factually correct and accurately reflects the content of the provided paper.
+
+    **Content Coverage Checklist (Generate cards addressing these aspects, if present in the paper):**
+
+    * **Core Problem/Question:** The specific gap, problem, or research question driving the study.
+    * **Hypothesis/Objective:** The main hypotheses tested or the study's primary objectives.
+    * **Methodology:** Key methods, techniques, apparatus, or data sources used. Include *why* a specific method was chosen if stated.
+    * **Key Findings/Results:** Specific, significant findings. Quantify results (e.g., effect sizes, p-values) if reported and relevant to the core finding. Frame as questions about the specific result.
+    * **Interpretations/Conclusions:** The authors' interpretations of the results and the main conclusions drawn. The paper's primary takeaway or contribution.
+    * **Limitations/Caveats:** Specific weaknesses, limitations, or boundary conditions acknowledged by the authors.
+    * **Key Terms/Concepts:** Definitions or explanations of crucial technical terms, theories, or concepts introduced or utilized in a specific way within the paper.
+    * **Connections:** (If explicitly stated) How specific findings relate back to the initial problem, question, or hypothesis.
+    * **Review/Meta-Analysis Specifics:** (If applicable) Overall trends, consensus findings, or major points of debate identified across the reviewed studies.
+    * **Theoretical Implications:** How the findings contribute to, challenge, or refine existing theories or conceptual frameworks.
+    * **Practical Implications:** Potential real-world applications or relevance of the findings.
+    * **Future Directions:** Specific suggestions made by the authors for future research.
+    * **Comparative Context:** (If discussed) How findings compare/contrast with specific prior research mentioned in the paper.
+
+    **Strategic Hint:** Use the paper's Abstract, Introduction, and Conclusion sections as primary sources for identifying the most crucial elements (Problem, Hypothesis, Main Findings, Conclusion), then delve into the Methods, Results, and Discussion for specifics.
+
+    **Mandatory Output Format:**
+    Return **ONLY** a valid JSON list containing flashcard objects.
+    Each object in the list MUST have exactly two keys: `"front"` (containing the question or prompt) and `"back"` (containing the answer or explanation).
+    Do **NOT** include any introductory text, concluding remarks, explanations, code blocks, or markdown formatting outside the JSON list itself. The entire output must start with `[` and end with `]`.
+
+    **Example JSON Output Structure:**
+    ```json
     [
-      {{"front": "What was the primary research question addressed in Author et al., 1999?", "back": "The study investigated the impact of X on Y under Z conditions."}},
-      {{"front": "Define 'epistemic uncertainty' as used in Author et al., 2005.", "back": "Uncertainty stemming from a lack of knowledge or data, as distinct from aleatoric uncertainty (inherent randomness)."}},
-      {{"front": "In Author et al., 2006, What was the main finding regarding the effect of the intervention reported?", "back": "A statistically significant improvement (p < .01) was observed in the intervention group compared to the control."}},
-      {{"front": "In Author et al., 2008, How was the negative correlation found between A and B interpreted?", "back": "It was suggested that factor A might inhibit process B under the studied conditions."}}
+      {{"front": "In Author et al., 1999, what was the primary research question?", "back": "The study investigated the causal relationship between Factor X and Outcome Y in Population Z."}},
+      {{"front": "Define 'operationalization' as used in the methodology section of Author et al., 2005.", "back": "The process of defining variables into measurable factors. In this study, 'well-being' was operationalized using the SWLS score."}},
+      {{"front": "What specific statistical significance level was reported for the main finding in Author et al., 2006?", "back": "A statistically significant effect was found (p < 0.01) for the primary outcome measure."}},
+      {{"front": "According to Author et al., 2008, what is one stated limitation regarding the study's generalizability?", "back": "The authors noted that the findings might be limited to the specific demographic group sampled (e.g., university students in North America)."}}
     ]
+    ```
 
-    **Now, analyze the provided PDF document and generate the JSON output based on its content, following all instructions:**
+    **Now, analyze the provided PDF document and generate the JSON output based strictly on its content, following all instructions.**
     """
     return prompt
 
