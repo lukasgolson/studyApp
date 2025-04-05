@@ -25,8 +25,8 @@ def configure_gemini():
             st.error("Google API Key found in Streamlit Secrets, but it is empty.")
             st.info("Please ensure the 'google_api_key' in your secrets configuration has a valid value.")
             return False
-        genai.Client(api_key=api_key)  # Correct method.
-        return True
+        client = genai.Client(api_key=api_key)  # Correct method.
+        return client
     except KeyError:
         st.error("Google Gemini API Key not found in Streamlit Secrets.")
         st.info("""
@@ -35,10 +35,10 @@ def configure_gemini():
             * **Deployed:** Add the `google_api_key` secret in Streamlit Community Cloud settings.
             Restart the app after adding the secret.
         """)
-        return False
+        return None
     except Exception as e:
         st.error(f"Failed to configure Gemini using key from Streamlit Secrets: {e}")
-        return False
+        return None
 
 
 def create_flashcard_prompt() -> str:
@@ -106,13 +106,11 @@ def create_flashcard_prompt() -> str:
     return prompt
 
 
-def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_name: str) -> list[tuple[
+def generate_flashcards_from_pdf(client, pdf_file_bytes: bytes, mime_type: str, model_name: str) -> list[tuple[
     str, str, str]] | None:
     """Generates Anki flashcard pairs from PDF bytes using Gemini with JSON output."""
     flashcards = []
     try:
-        client = genai.Client()
-
         pdf_document_part = types.Part.from_bytes(data=pdf_file_bytes, mime_type=mime_type)
         st.info(f"Prepared {mime_type} part ({len(pdf_file_bytes) / 1024:.1f} KB).")
 
@@ -277,7 +275,8 @@ if uploaded_file is not None:
         st.session_state.processed_filename = uploaded_file.name
 
         with st.spinner(f"Configuring API and sending PDF to Gemini ({selected_model}) for processing..."):
-            if not configure_gemini():
+            client = configure_gemini()
+            if client is None:
                 st.stop()
 
             pdf_bytes = uploaded_file.getvalue()
@@ -287,7 +286,7 @@ if uploaded_file is not None:
                 st.error("Could not read bytes from the uploaded PDF file.")
                 st.stop()
 
-            st.session_state.flashcards = generate_flashcards_from_pdf(
+            st.session_state.flashcards = generate_flashcards_from_pdf(client,
                 pdf_bytes,
                 mime_type,
                 selected_model
