@@ -14,6 +14,7 @@ AVAILABLE_MODELS = ["gemini-2.5-pro-preview-03-25", "gemini-2.5-pro-exp-03-25", 
 ANKI_DELIMITER = ';'
 API_RETRY_DELAY = 5
 
+
 # --- Core Logic Functions ---
 
 def configure_gemini():
@@ -21,10 +22,10 @@ def configure_gemini():
     try:
         api_key = st.secrets["google_api_key"]
         if not api_key:
-             st.error("Google API Key found in Streamlit Secrets, but it is empty.")
-             st.info("Please ensure the 'google_api_key' in your secrets configuration has a valid value.")
-             return False
-        genai.Client(api_key=api_key) # Correct method.
+            st.error("Google API Key found in Streamlit Secrets, but it is empty.")
+            st.info("Please ensure the 'google_api_key' in your secrets configuration has a valid value.")
+            return False
+        genai.Client(api_key=api_key)  # Correct method.
         return True
     except KeyError:
         st.error("Google Gemini API Key not found in Streamlit Secrets.")
@@ -38,6 +39,7 @@ def configure_gemini():
     except Exception as e:
         st.error(f"Failed to configure Gemini using key from Streamlit Secrets: {e}")
         return False
+
 
 def create_flashcard_prompt() -> str:
     """Creates the detailed prompt for Gemini requesting structured JSON output from a provided document."""
@@ -92,10 +94,10 @@ def create_flashcard_prompt() -> str:
     **Example JSON Output Structure:**
     ```json
     [
-      {{"front": "In Author et al., 1999, what was the primary research question?", "back": "The study investigated the causal relationship between Factor X and Outcome Y in Population Z."}},
-      {{"front": "Define 'operationalization' as used in the methodology section of Author et al., 2005.", "back": "The process of defining variables into measurable factors. In this study, 'well-being' was operationalized using the SWLS score."}},
-      {{"front": "What specific statistical significance level was reported for the main finding in Author et al., 2006?", "back": "A statistically significant effect was found (p < 0.01) for the primary outcome measure."}},
-      {{"front": "According to Author et al., 2008, what is one stated limitation regarding the study's generalizability?", "back": "The authors noted that the findings might be limited to the specific demographic group sampled (e.g., university students in North America)."}}
+      {{"front": "In Author et al., 1999, what was the primary research question?", "back": "The study investigated the causal relationship between Factor X and Outcome Y in Population Z.", "tags": "research_question introduction causality"}},
+      {{"front": "Define 'operationalization' as used in the methodology section of Author et al., 2005.", "back": "The process of defining variables into measurable factors. In this study, 'well-being' was operationalized using the SWLS score.", "tags": "definition methodology operationalization measurement"}},
+      {{"front": "What specific statistical significance level was reported for the main finding in Author et al., 2006?", "back": "A statistically significant effect was found (p < 0.01) for the primary outcome measure.", "tags": "results finding statistics significance p-value"}},
+      {{"front": "According to Author et al., 2008, what is one stated limitation regarding the study's generalizability?", "back": "The authors noted that the findings might be limited to the specific demographic group sampled (e.g., university students in North America).", "tags": "limitation generalizability discussion sampling"}}
     ]
     ```
 
@@ -103,7 +105,9 @@ def create_flashcard_prompt() -> str:
     """
     return prompt
 
-def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_name: str) -> list[tuple[str, str]] | None:
+
+def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_name: str) -> list[tuple[
+    str, str, str]] | None:
     """Generates Anki flashcard pairs from PDF bytes using Gemini with JSON output."""
     flashcards = []
     try:
@@ -130,35 +134,56 @@ def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_na
 
             try:
                 response_text = response.text.strip()
-                if response_text.startswith("```json"): response_text = response_text[7:]
-                if response_text.endswith("```"): response_text = response_text[:-3]
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
                 response_text = response_text.strip()
 
                 if not response_text:
                     st.warning(f"Received empty response from Gemini (Attempt {attempts + 1}/{max_attempts}).")
-                    processed = True; break
+                    processed = True;
+                    break
 
                 cards_data = json.loads(response_text)
 
                 if not isinstance(cards_data, list):
-                    st.warning(f"Gemini response was not a JSON list (Attempt {attempts + 1}/{max_attempts}). Skipping. Response: {response_text[:100]}...")
-                    processed = True; break
+                    st.warning(
+                        f"Gemini response was not a JSON list (Attempt {attempts + 1}/{max_attempts}). Skipping. Response: {response_text[:100]}...")
+                    processed = True;
+                    break
 
                 total_generated = 0
+                total_generated = 0
                 for card_obj in cards_data:
+                    # Check if it's a dict and has the required keys
                     if isinstance(card_obj, dict) and 'front' in card_obj and 'back' in card_obj:
                         front = str(card_obj['front']).strip()
                         back = str(card_obj['back']).strip()
+                        # --- Tag Extraction ---
+                        # Get tags if present, otherwise default to empty string.
+                        # Ensure tags are treated as a single string.
+                        tags_raw = card_obj.get('tags', '')  # Safely get 'tags', default to ''
+                        if isinstance(tags_raw, list):
+                            # If LLM mistakenly returns a list, join it. Adjust if needed.
+                            tags = " ".join(str(t).strip() for t in tags_raw).strip()
+                            st.warning(f"Received tags as list, joined to: '{tags}'")
+                        else:
+                            tags = str(tags_raw).strip()
+
+                        # Only add if front and back are non-empty
                         if front and back:
-                            flashcards.append((front, back))
+                            flashcards.append((front, back, tags))  # Append tuple with tags
                             total_generated += 1
                     else:
-                        st.warning(f"Invalid card structure found in response: {card_obj}")
+                        st.warning(
+                            f"Invalid card structure found or missing front/back: {str(card_obj)[:100]}...")  # Log truncated object
 
                 if total_generated > 0:
                     st.success(f"Flashcard generation complete. Total cards: {total_generated}")
                 else:
-                    st.warning("Processing complete, but no flashcards were generated from the content. The model may not have found relevant information or the format wasn't suitable.")
+                    st.warning(
+                        "Processing complete, but no flashcards were generated from the content. The model may not have found relevant information or the format wasn't suitable.")
                 processed = True
 
             except json.JSONDecodeError as json_e:
@@ -169,7 +194,8 @@ def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_na
             except Exception as parse_e:
                 st.error(f"Error processing response content: {parse_e}")
                 st.text(f"Response (first 200 chars): {response.text[:200]}...")
-                processed = True; break
+                processed = True;
+                break
         except Exception as e:
             st.error(f"Gemini API call error (Attempt {attempts + 1}/{max_attempts}): {e}")
             try:
@@ -180,16 +206,16 @@ def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_na
                 if response_details and response_details.prompt_feedback:
                     st.warning(f"Prompt Feedback: {response_details.prompt_feedback}")
                 if response_details and response_details.candidates and response_details.candidates[0].finish_reason:
-                     finish_reason = response_details.candidates[0].finish_reason
-                     st.warning(f"Generation Finish Reason: {finish_reason}")
-                     if finish_reason == genai.types.FinishReason.SAFETY:
-                          st.error("Content generation stopped due to safety settings.")
-                     elif finish_reason == genai.types.FinishReason.RECITATION:
-                           st.warning("Content generation stopped due to potential recitation.")
-                     elif finish_reason == genai.types.FinishReason.MAX_TOKENS:
-                           st.warning("Content generation stopped because the maximum output token limit was reached.")
-                     elif finish_reason != genai.types.FinishReason.STOP:
-                           st.warning(f"Content generation stopped for reason: {finish_reason.name}")
+                    finish_reason = response_details.candidates[0].finish_reason
+                    st.warning(f"Generation Finish Reason: {finish_reason}")
+                    if finish_reason == genai.types.FinishReason.SAFETY:
+                        st.error("Content generation stopped due to safety settings.")
+                    elif finish_reason == genai.types.FinishReason.RECITATION:
+                        st.warning("Content generation stopped due to potential recitation.")
+                    elif finish_reason == genai.types.FinishReason.MAX_TOKENS:
+                        st.warning("Content generation stopped because the maximum output token limit was reached.")
+                    elif finish_reason != genai.types.FinishReason.STOP:
+                        st.warning(f"Content generation stopped for reason: {finish_reason.name}")
 
             except AttributeError:
                 st.warning("Could not access detailed feedback fields in the response object.")
@@ -199,18 +225,18 @@ def generate_flashcards_from_pdf(pdf_file_bytes: bytes, mime_type: str, model_na
 
         attempts += 1
         if not processed and attempts == max_attempts:
-             st.error(f"Failed to process PDF after {max_attempts} attempts.")
-             return None
+            st.error(f"Failed to process PDF after {max_attempts} attempts.")
+            return None
 
     return flashcards if processed and flashcards else None
 
-def convert_to_anki_csv(flashcards: list[tuple[str, str]]) -> str:
+
+def convert_to_anki_csv(flashcards: list[tuple[str, str, str]]) -> str:
     """Converts the list of flashcards to a CSV string."""
     output = io.StringIO()
     writer = csv.writer(output, delimiter=ANKI_DELIMITER, quoting=csv.QUOTE_MINIMAL)
     writer.writerows(flashcards)
     return output.getvalue()
-
 
 
 st.set_page_config(page_title="Article to Anki Flashcards", layout="wide")
@@ -240,7 +266,7 @@ if 'flashcards' not in st.session_state:
 if 'output_csv_data' not in st.session_state:
     st.session_state.output_csv_data = None
 if 'processed_filename' not in st.session_state:
-     st.session_state.processed_filename = None
+    st.session_state.processed_filename = None
 
 if uploaded_file is not None:
     st.info(f"Uploaded file: `{uploaded_file.name}` (Type: {uploaded_file.type})")
@@ -295,6 +321,8 @@ if st.session_state.output_csv_data:
 
 elif st.session_state.processed_filename:
     if st.session_state.flashcards is None:
-         st.error(f"Flashcard generation process failed for '{st.session_state.processed_filename}'. Please check error messages above. Ensure the selected model ({selected_model}) supports PDF input and JSON output.")
+        st.error(
+            f"Flashcard generation process failed for '{st.session_state.processed_filename}'. Please check error messages above. Ensure the selected model ({selected_model}) supports PDF input and JSON output.")
     elif not st.session_state.flashcards:
-         st.warning(f"Processing complete for '{st.session_state.processed_filename}', but no flashcards were successfully generated. The model may not have found relevant information, the PDF content might be unsuitable (e.g., image-only), or the response format was invalid.")
+        st.warning(
+            f"Processing complete for '{st.session_state.processed_filename}', but no flashcards were successfully generated. The model may not have found relevant information, the PDF content might be unsuitable (e.g., image-only), or the response format was invalid.")
