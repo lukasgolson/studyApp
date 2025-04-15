@@ -67,6 +67,7 @@ def create_flashcard_prompt() -> str:
     9.  **Keep Answers Short:** Answers (back) should ideally be 1-3 concise sentences. Use bullet points *only* if absolutely essential for clarity within a *single* atomic concept and cannot be broken into separate atomic cards.
     10. **Use Examples (If Applicable):** If the paper provides specific examples to illustrate a concept or finding, create a card asking about that example or its significance.
     11. **Verify Accuracy:** Ensure all information presented in the cards is factually correct and accurately reflects the content of the provided paper.
+    12. **Accuracy and Emphasis Preservation:** Faithfully represent the original paper’s content and emphasis. Refrain from reinterpreting or overgeneralizing. All information in your summary must be derived exclusively from this provided document. All content must be strictly traceable to the provided paper. Do not infer, speculate, or synthesize beyond what is explicitly stated in the document. Do not incorporate any external sources or prior knowledge.
 
     **Content Coverage Checklist (Generate cards addressing these aspects, if present in the paper):**
 
@@ -229,6 +230,84 @@ def generate_flashcards_from_pdf(client, pdf_file_bytes: bytes, mime_type: str, 
     return flashcards if processed and flashcards else None
 
 
+def generate_summary_from_pdf(client, model_name, pdf_bytes: bytes, mime_type: str) -> str | None:
+    """Generates a 3-4 paragraph summary from PDF bytes using Gemini."""
+
+
+    try:
+        pdf_document_part = types.Part.from_bytes(data=pdf_bytes, mime_type=mime_type)
+        st.info(f"Prepared {mime_type} part ({len(pdf_bytes) / 1024:.1f} KB).")
+
+    except Exception as e:
+        st.error(f"Error preparing PDF part for summary: {e}")
+        return None
+
+    st.info("Generating article summary with Gemini...")
+
+    prompt_text = create_summary_prompt()
+
+    attempts = 0
+    max_attempts = 3 # Allow retries for summary too
+    summary_text = None
+
+    while attempts < max_attempts and summary_text is None:
+        try:
+            # Using the passed model object to generate content
+
+            response = client.models.generate_content(model=model_name, contents=[prompt_text, pdf_document_part])
+
+            response_text = response.text.strip()
+
+            if response_text:
+                # Basic check: Does it look roughly like a few paragraphs?
+                # More sophisticated checks could be added (e.g., paragraph count)
+                # but LLMs might format paragraphs differently.
+                if len(response_text.split('\n\n')) >= 2 or len(response_text) > 100: # Heuristic check
+                    st.success("Summary generation complete.")
+                    summary_text = response_text
+                else:
+                     st.warning(f"Received very short or oddly formatted summary (Attempt {attempts + 1}/{max_attempts}). Retrying...")
+                     attempts += 1
+                     time.sleep(API_RETRY_DELAY * attempts)
+
+            else:
+                st.warning(f"Received empty response for summary from Gemini (Attempt {attempts + 1}/{max_attempts}). Retrying...")
+                attempts += 1
+                time.sleep(API_RETRY_DELAY * attempts)
+
+
+        # --- Error Handling for API call ---
+        except Exception as e:
+            st.error(f"Gemini API call error for summary (Attempt {attempts + 1}/{max_attempts}): {e}")
+             # Try to get more details from the error or response if available
+            try:
+                 # Accessing potential feedback - structure might vary
+                feedback = getattr(response, 'prompt_feedback', None)
+                if feedback:
+                    st.warning(f"Prompt Feedback: {feedback}")
+                candidates = getattr(response, 'candidates', [])
+                if candidates:
+                    reason = getattr(candidates[0], 'finish_reason', None)
+                    if reason and reason != genai.types.FinishReason.STOP: # Use genai.types if available
+                         st.warning(f"Generation Finish Reason: {reason.name}")
+                         if reason == genai.types.FinishReason.SAFETY:
+                            st.error("Content generation stopped due to safety settings.")
+                         # Add other reasons as needed...
+            except AttributeError:
+                 st.warning("Could not access detailed feedback/finish reason fields.")
+            except Exception as feedback_e:
+                 st.warning(f"Could not access detailed feedback: {feedback_e}")
+
+            attempts += 1
+            if attempts < max_attempts:
+                 time.sleep(API_RETRY_DELAY * attempts) # Exponential backoff
+            else:
+                 st.error(f"Failed to generate summary after {max_attempts} attempts.")
+                 summary_text = None # Indicate failure
+                 # No need to set processed=True here, just break the loop
+
+    return summary_text # Return the text or None
+
 def convert_to_anki_csv(flashcards: list[tuple[str, str, str]]) -> str:
     """Converts the list of flashcards to a CSV string."""
     output = io.StringIO()
@@ -266,6 +345,62 @@ if 'output_csv_data' not in st.session_state:
 if 'processed_filename' not in st.session_state:
     st.session_state.processed_filename = None
 
+if 'summary_article' not in st.session_state:
+    st.session_state.summary_article = None
+
+
+def create_summary_prompt() -> str:
+    """Creates the prompt for Gemini requesting a learning-focused summary."""
+
+    prompt = """
+    You are an expert academic assistant specializing in cognitive science and effective learning strategies. Your task is to summarize an academic paper concisely to prepare a user for detailed study, such as reviewing comprehensive flashcards created from the paper's contents.
+
+    **Input Source:**
+    You will receive a single academic paper document (PDF). All information in your summary must be derived exclusively from this provided document. All content must be strictly traceable to the provided paper. Do not infer, speculate, or synthesize beyond what is explicitly stated in the document. Do not incorporate any external sources or prior knowledge.
+    
+    **Target Audience:**
+    Write the summary in a tone suitable for an intelligent, non-specialist graduate student preparing for deeper academic study. Use accessible academic language, defining any essential terms implicitly through context.
+    
+    **Task Goal:**
+    Create a structured, high-level summary of the provided academic paper in 4 to 6 concise paragraphs, facilitating effective deeper learning and detailed review.
+    
+    **Structure and Content:**
+    Your summary should clearly follow this logical structure:
+    
+    1. Introduction (Paragraph 1): Clearly state the central research problem, the research question(s), or the hypothesis that the paper addresses. Mention why this topic is significant or relevant to the field.
+    
+    2. Methodology (Paragraph 2): Briefly summarize the key methods used by the authors, including participants, primary procedures, and the main measures or data sources. If authors explicitly discuss their method choice, include their rationale.
+    
+    3. Key Findings (Paragraph 3 and, if needed, Paragraph 4): Summarize the most significant results or findings. Focus on major insights and avoid excessive detail. Clearly relate these findings back to the original research question or hypothesis.
+    
+    4. Conclusions and Significance (Paragraph 4 or 5): Describe the main conclusions drawn by the authors. Explicitly address why these findings matter—answering the "so what?" question clearly within the context of the field. Preserve the emphasis and framing chosen by the authors. If a result is highlighted in the abstract or discussion, reflect that prominence in the summary.
+    
+    5. Limitations and Future Directions (Optional Paragraph 5 or 6): Briefly mention the major limitations noted by the authors and highlight their suggested avenues for future research, emphasizing how this could contribute further to the field.
+    
+    **Learning Principles to Apply:**
+    
+    - Clarity and Simplicity: Use straightforward language to reduce cognitive load, implicitly defining any essential terms within context.
+    
+    - Focus on Essentials: Highlight only critical information. Avoid including detailed statistical results, sub-study comparisons, or technical equations unless they are essential to the paper’s main conclusions.
+    
+    - Logical Flow: Ensure sentences and paragraphs transition smoothly, providing coherent scaffolding for deeper learning.
+    
+    - Priming for Deeper Study: Clearly connect findings and concepts to the broader research context, preparing users for subsequent detailed review through flashcards.
+    
+    - Accuracy and Emphasis Preservation: Faithfully represent the original paper’s content and emphasis. Refrain from reinterpreting or overgeneralizing.
+    
+    **Mandatory Output Format:**
+    Provide ONLY the text of your summary structured into 4 to 6 concise paragraphs. Do NOT include introductory statements (e.g., "Here is the summary:") or concluding remarks. Do not use markdown formatting, bullet points, or enumerations unless naturally part of the prose. The summary must be plain text, ready for direct display.
+    
+    **Evaluation Reminder:**
+    Ensure your summary can stand alone as a preparation tool for flashcard review, highlighting key ideas without duplicating flashcard-level detail.
+    
+    **Now, thoroughly analyze the provided PDF document and generate your summary strictly adhering to these instructions.**
+    """
+    return prompt
+
+
+
 if uploaded_file is not None:
     st.info(f"Uploaded file: `{uploaded_file.name}` (Type: {uploaded_file.type})")
 
@@ -294,6 +429,18 @@ if uploaded_file is not None:
 
             if st.session_state.flashcards:
                 st.session_state.output_csv_data = convert_to_anki_csv(st.session_state.flashcards)
+
+
+            st.session_state.summary_article = generate_summary_from_pdf(client, selected_model, pdf_bytes, mime_type)
+
+
+# Display Summary (if generated)
+if st.session_state.summary_article:
+    st.markdown("---")
+    st.header("📄 Article Summary")
+    st.markdown("Read this summary to get an overview before diving into the flashcards.")
+    st.markdown(st.session_state.summary_article) # Display the generated summary
+
 
 if st.session_state.output_csv_data:
     st.markdown("---")
